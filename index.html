@@ -104,7 +104,7 @@ const META = DATA.meta, ROWS = DATA.rows;
 const ALL = "__all__";
 
 const COLS = [
-  { key: "symbol", label: "股票", cls: "l", sortable: true },
+  { key: "recent", label: "股票", cls: "l", sortable: true },  // 依代號旁 ▲▼ 標籤排序
   { key: "close", label: "收盤價", sortable: true },
   { key: "target", label: "目標價", sub: "均值・高・低", sortable: true },
   { key: "upside", label: "目標價差", sub: "%", sortable: true },
@@ -119,7 +119,11 @@ const state = loadState();
 
 function loadState() {
   const d = { group: ALL, sortKey: "upside", sortDir: -1, q: "", onlyChanged: false };
-  try { return Object.assign(d, JSON.parse(localStorage.getItem("tt_state") || "{}")); } catch (e) { return d; }
+  try {
+    const saved = Object.assign(d, JSON.parse(localStorage.getItem("tt_state") || "{}"));
+    if (!COLS.some(c => c.sortable && c.key === saved.sortKey)) { saved.sortKey = "upside"; saved.sortDir = -1; }  // 舊版存的欄位已不存在
+    return saved;
+  } catch (e) { return d; }
 }
 function saveState() {
   try { localStorage.setItem("tt_state", JSON.stringify(state)); } catch (e) {}
@@ -133,7 +137,11 @@ const pct = v => v == null ? '<span class="empty">—</span>' : `<span class="nu
 
 function sortValue(r, key) {
   if (key === "last_change") return r.changes.length ? r.changes[0].rate_date : null;
-  if (key === "symbol") return r.symbol;
+  if (key === "recent") {
+    // 越近越前面；同一天調升排在調降前面。沒有標籤的回傳 null（永遠排最後）
+    const rc = r.recent_change;
+    return rc ? rc.days * 2 + (rc.dir === "up" ? 0 : 1) : null;
+  }
   return r[key];
 }
 
@@ -180,7 +188,7 @@ function renderHead() {
   document.querySelectorAll("th.sortable").forEach(th => th.onclick = () => {
     const k = th.dataset.key;
     if (state.sortKey === k) state.sortDir *= -1;
-    else { state.sortKey = k; state.sortDir = k === "symbol" ? 1 : -1; }
+    else { state.sortKey = k; state.sortDir = k === "recent" ? 1 : -1; }
     render();
   });
 }
@@ -197,10 +205,11 @@ function render() {
   const k = state.sortKey, dir = state.sortDir;
   rows.sort((a, b) => {
     const va = sortValue(a, k), vb = sortValue(b, k);
-    if (va == null && vb == null) return 0;
+    if (va == null && vb == null) return a.symbol < b.symbol ? -1 : 1;
     if (va == null) return 1;          // 空值永遠排最後
     if (vb == null) return -1;
-    return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
+    if (va === vb) return a.symbol < b.symbol ? -1 : 1;  // 同值時依代號，順序才固定
+    return (va < vb ? -1 : 1) * dir;
   });
 
   document.getElementById("tbody").innerHTML = rows.map(r => {
